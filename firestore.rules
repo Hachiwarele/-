@@ -35,7 +35,24 @@ service cloud.firestore {
 
       match /members/{slot} {
         allow get: if signedIn();
-        allow list, update, delete: if false;
+        allow list, delete: if false;
+
+        function validBClaim() {
+          return signedIn()
+            && slot == "B"
+            && request.resource.data.uid == request.auth.uid
+            && request.resource.data.inviteKey is string
+            && exists(/databases/$(database)/documents/invites/$(request.resource.data.inviteKey))
+            && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteKey)).data.spaceId == spaceId
+            && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteKey)).data.createdBy
+              == get(/databases/$(database)/documents/spaces/$(spaceId)).data.createdBy
+            && exists(/databases/$(database)/documents/spaces/$(spaceId)/members/A)
+            && get(/databases/$(database)/documents/spaces/$(spaceId)/members/A).data.uid
+              == get(/databases/$(database)/documents/spaces/$(spaceId)).data.createdBy;
+        }
+
+        allow update: if validBClaim()
+          && resource.data.inviteKey == request.resource.data.inviteKey;
 
         allow create: if signedIn()
           && (
@@ -44,15 +61,7 @@ service cloud.firestore {
               && !exists(/databases/$(database)/documents/spaces/$(spaceId)/members/A))
             ||
             (slot == "B"
-              && request.resource.data.uid == request.auth.uid
-              && request.resource.data.inviteKey is string
-              && exists(/databases/$(database)/documents/invites/$(request.resource.data.inviteKey))
-              && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteKey)).data.spaceId == spaceId
-              && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteKey)).data.createdBy
-                == get(/databases/$(database)/documents/spaces/$(spaceId)).data.createdBy
-              && exists(/databases/$(database)/documents/spaces/$(spaceId)/members/A)
-              && get(/databases/$(database)/documents/spaces/$(spaceId)/members/A).data.uid
-                == get(/databases/$(database)/documents/spaces/$(spaceId)).data.createdBy
+              && validBClaim()
               && !exists(/databases/$(database)/documents/spaces/$(spaceId)/members/B))
           );
       }
