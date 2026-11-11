@@ -558,17 +558,17 @@ async function joinSharedSpace() {
     const spaceId = inviteSnap.data().spaceId;
     const memberRef = doc(db, "spaces", spaceId, "members", "B");
     const existingB = await getDoc(memberRef);
-    if (existingB.exists()) {
-      authMessage("この共有スペースにはすでに2人参加しているよ。");
-      return;
-    }
+    // B枠がすでに埋まっていても、招待キーを持つ人はこの端末の匿名IDで再登録できる。
+    // ブラウザデータ消去後の復帰用。招待キーは本人確認用の秘密情報として扱う。
     await setDoc(memberRef, {
       uid: currentUser.uid,
       inviteKey,
       joinedAt: serverTimestamp()
     });
     showApp(spaceId);
-    authMessage("参加できたよ！共有データを読み込んでいるよ。");
+    authMessage(existingB.exists()
+      ? "再参加できたよ！以前の共有データを読み込んでいるよ。"
+      : "参加できたよ！共有データを読み込んでいるよ。");
   } catch (error) {
     console.error("Join space error:", error);
     authMessage("参加できませんでした。Firestoreのルールが設定済みか、招待キーが正しいか確認してね。");
