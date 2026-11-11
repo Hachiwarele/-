@@ -209,10 +209,49 @@ footer {
   .type { font-size: 11px; }
   .card { padding: 16px; }
 }
+
+.auth-screen { max-width:650px; margin:24px auto; padding:0 16px 40px; }
+.auth-card { background:#fff; border-radius:20px; padding:20px; margin-bottom:15px; box-shadow:0 4px 18px #4B315B0B; }
+.auth-screen h2 { font-size:17px; margin:0 0 10px; }
+.auth-screen p { color:var(--muted); font-size:12px; line-height:1.7; }
+.auth-screen .field { margin-top:14px; }
+.auth-message { background:var(--main-light); padding:12px; border-radius:11px; font-size:12px; line-height:1.7; margin:12px 0; }
+.invite-code { overflow-wrap:anywhere; background:#F8F3FF; border:1px dashed var(--main-dark); padding:13px; border-radius:11px; font-size:13px; font-weight:800; letter-spacing:1px; }
+.sync-status { font-size:11px; color:#78648B; margin-top:10px; }
 </style>
 </head>
 <body>
 
+<section id="authScreen" class="auth-screen hidden">
+  <div class="auth-card" style="text-align:center;margin-top:25px">
+    <div class="brand">♡ TWO PEOPLE MONEY</div>
+    <h2 style="font-size:22px;margin-top:9px">ふたりのお金管理</h2>
+    <p>メールアドレス不要。最初に共有スペースを作るか、相手から届いた招待キーで参加してね。</p>
+  </div>
+  <div class="auth-card">
+    <h2>共有スペースを作成</h2>
+    <p>最初に使う人はこちら。今のスマホに保存されている取引履歴を引き継ぐことができます。</p>
+    <button class="primary" id="createSpace">新しく作成する</button>
+  </div>
+  <div class="auth-card">
+    <h2>招待キーで参加</h2>
+    <div class="field">
+      <label>招待キー</label>
+      <input id="inviteInput" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="相手から受け取った48文字のキー">
+    </div>
+    <button class="primary" id="joinSpace">共有スペースに参加する</button>
+  </div>
+  <div id="authMessage" class="auth-message hidden" role="status"></div>
+  <div id="inviteResult" class="auth-card hidden">
+    <h2>招待キーを相手に送ってね ♡</h2>
+    <div class="invite-code" id="inviteValue"></div>
+    <button class="secondary" id="copyInvite" style="width:100%;margin-top:12px">招待キーをコピー</button>
+    <p>このキーを持っている人は参加できる可能性があるので、2人だけで保管してね。</p>
+    <button class="primary" id="continueToApp">アプリを開く</button>
+  </div>
+</section>
+
+<div id="appShell" class="hidden">
 <header>
   <div class="header-inner">
     <div class="brand">♡ TWO PEOPLE MONEY</div>
@@ -335,11 +374,35 @@ footer {
     </div>
   </section>
 
+  <div class="sync-status" id="syncStatus">共有データに接続中…</div>
   <footer>ふたりのお金管理 ♡ YOUR MONEY, YOUR RECORD</footer>
 </main>
+</div>
 
-<script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-app.js";
+import { getAuth, setPersistence, browserLocalPersistence, signInAnonymously, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-auth.js";
+import { getFirestore, doc, getDoc, setDoc, writeBatch, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDV1rSnPPGjGZNGkOueqPITcngV6_m6Iuk",
+  authDomain: "futari-money.firebaseapp.com",
+  projectId: "futari-money",
+  storageBucket: "futari-money.firebasestorage.app",
+  messagingSenderId: "527449622371",
+  appId: "1:527449622371:web:63fcba5d5b16764c9d3556",
+  measurementId: "G-78PLJJKEW0"
+};
+const firebaseApp = initializeApp(firebaseConfig);
+const auth = getAuth(firebaseApp);
+const db = getFirestore(firebaseApp);
 const STORAGE_KEY = "two_people_money_v1";
+const SPACE_KEY = "futari_money_space_id";
+let currentUser = null;
+let cloudReady = false;
+let cloudDataRef = null;
+let unsubscribeCloud = null;
+let applyingRemote = false;
 
 const initialData = {
   names: { A: "A", B: "B" },
@@ -362,6 +425,149 @@ const $ = id => document.getElementById(id);
 
 function save() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  if (cloudReady && cloudDataRef && !applyingRemote) {
+    $("syncStatus").textContent = "クラウドに保存中…";
+    setDoc(cloudDataRef, {
+      names: data.names,
+      transactions: data.transactions,
+      updatedAt: serverTimestamp()
+    }).then(() => {
+      $("syncStatus").textContent = "✓ ふたりの端末に共有中";
+    }).catch(error => {
+      console.error("Firestore save error:", error);
+      $("syncStatus").textContent = "同期エラー：通信またはFirestoreルールを確認してね";
+    });
+  }
+}
+
+function authMessage(message) {
+  const el = $("authMessage");
+  el.textContent = message;
+  el.classList.remove("hidden");
+}
+
+function showAuth() {
+  $("authScreen").classList.remove("hidden");
+  $("appShell").classList.add("hidden");
+}
+
+function randomInviteKey() {
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  return Array.from(bytes, value => value.toString(16).padStart(2, "0")).join("");
+}
+
+function showApp(spaceId) {
+  localStorage.setItem(SPACE_KEY, spaceId);
+  cloudDataRef = doc(db, "spaces", spaceId, "data", "main");
+  cloudReady = true;
+  $("authScreen").classList.add("hidden");
+  $("appShell").classList.remove("hidden");
+  if (unsubscribeCloud) unsubscribeCloud();
+  $("syncStatus").textContent = "共有データに接続中…";
+  unsubscribeCloud = onSnapshot(cloudDataRef, snapshot => {
+    if (snapshot.exists()) {
+      const remote = snapshot.data();
+      if (remote && remote.names && Array.isArray(remote.transactions)) {
+        applyingRemote = true;
+        data = { names: remote.names, transactions: remote.transactions };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        render();
+        applyingRemote = false;
+      }
+    }
+    $("syncStatus").textContent = "✓ ふたりの端末に共有中";
+  }, error => {
+    console.error("Firestore listener error:", error);
+    $("syncStatus").textContent = "同期エラー：Firestoreルールを確認してね";
+  });
+}
+
+async function restoreMembership() {
+  const spaceId = localStorage.getItem(SPACE_KEY);
+  if (!spaceId || !currentUser) return false;
+  for (const slot of ["A", "B"]) {
+    const memberSnap = await getDoc(doc(db, "spaces", spaceId, "members", slot));
+    if (memberSnap.exists() && memberSnap.data().uid === currentUser.uid) {
+      showApp(spaceId);
+      return true;
+    }
+  }
+  localStorage.removeItem(SPACE_KEY);
+  return false;
+}
+
+async function createSharedSpace() {
+  $("createSpace").disabled = true;
+  try {
+    const spaceId = crypto.randomUUID();
+    const inviteKey = randomInviteKey();
+    const batch = writeBatch(db);
+    batch.set(doc(db, "spaces", spaceId), {
+      createdBy: currentUser.uid,
+      createdAt: serverTimestamp()
+    });
+    batch.set(doc(db, "spaces", spaceId, "members", "A"), {
+      uid: currentUser.uid,
+      joinedAt: serverTimestamp()
+    });
+    batch.set(doc(db, "invites", inviteKey), {
+      spaceId,
+      createdBy: currentUser.uid,
+      createdAt: serverTimestamp()
+    });
+    batch.set(doc(db, "spaces", spaceId, "data", "main"), {
+      names: data.names,
+      transactions: data.transactions,
+      updatedAt: serverTimestamp()
+    });
+    await batch.commit();
+    $("inviteValue").textContent = inviteKey;
+    $("inviteResult").classList.remove("hidden");
+    authMessage("共有スペースを作成できたよ！この招待キーをもう1人のスマホに送ってね。");
+    showApp(spaceId);
+    $("appShell").classList.add("hidden");
+    $("authScreen").classList.remove("hidden");
+  } catch (error) {
+    console.error("Create space error:", error);
+    authMessage("作成できませんでした。Firestoreのルールがまだ設定前なら、設定後にもう一度試してね。");
+  } finally {
+    $("createSpace").disabled = false;
+  }
+}
+
+async function joinSharedSpace() {
+  const inviteKey = $("inviteInput").value.trim().toLowerCase();
+  if (!/^[0-9a-f]{48}$/.test(inviteKey)) {
+    authMessage("招待キーは48文字の英数字（0〜9、a〜f）だよ。もう一度確認してね。");
+    return;
+  }
+  $("joinSpace").disabled = true;
+  try {
+    const inviteSnap = await getDoc(doc(db, "invites", inviteKey));
+    if (!inviteSnap.exists()) {
+      authMessage("招待キーが見つからないよ。入力を確認してね。");
+      return;
+    }
+    const spaceId = inviteSnap.data().spaceId;
+    const memberRef = doc(db, "spaces", spaceId, "members", "B");
+    const existingB = await getDoc(memberRef);
+    if (existingB.exists()) {
+      authMessage("この共有スペースにはすでに2人参加しているよ。");
+      return;
+    }
+    await setDoc(memberRef, {
+      uid: currentUser.uid,
+      inviteKey,
+      joinedAt: serverTimestamp()
+    });
+    showApp(spaceId);
+    authMessage("参加できたよ！共有データを読み込んでいるよ。");
+  } catch (error) {
+    console.error("Join space error:", error);
+    authMessage("参加できませんでした。Firestoreのルールが設定済みか、招待キーが正しいか確認してね。");
+  } finally {
+    $("joinSpace").disabled = false;
+  }
 }
 
 function yen(n) {
@@ -627,6 +833,47 @@ document.querySelectorAll(".tab").forEach(btn => {
 $("date").value = today();
 $("repayDate").value = today();
 render();
+
+$("createSpace").addEventListener("click", createSharedSpace);
+$("joinSpace").addEventListener("click", joinSharedSpace);
+$("copyInvite").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText($("inviteValue").textContent);
+    authMessage("招待キーをコピーしたよ！");
+  } catch {
+    authMessage("コピーできなかったので、招待キーを長押ししてコピーしてね。");
+  }
+});
+$("continueToApp").addEventListener("click", () => {
+  $("authScreen").classList.add("hidden");
+  $("appShell").classList.remove("hidden");
+});
+setPersistence(auth, browserLocalPersistence).then(() => {
+  onAuthStateChanged(auth, async user => {
+    if (!user) {
+      try { await signInAnonymously(auth); }
+      catch (error) {
+        console.error("Anonymous auth error:", error);
+        showAuth();
+        authMessage("匿名ログインに失敗したよ。Firebase Authenticationで匿名ログインが有効か確認してね。");
+      }
+      return;
+    }
+    currentUser = user;
+    try {
+      const restored = await restoreMembership();
+      if (!restored) showAuth();
+    } catch (error) {
+      console.error("Restore error:", error);
+      showAuth();
+      authMessage("ログイン状態を確認できなかったよ。Firestoreのルール設定を確認してね。");
+    }
+  });
+}).catch(error => {
+  console.error("Auth persistence error:", error);
+  showAuth();
+  authMessage("ログイン状態を保存できなかったよ。ブラウザの設定を確認してね。");
+});
 </script>
 </body>
 </html>
