@@ -1,0 +1,63 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isMember(spaceId) {
+      return signedIn()
+        && (
+          (exists(/databases/$(database)/documents/spaces/$(spaceId)/members/A)
+            && get(/databases/$(database)/documents/spaces/$(spaceId)/members/A).data.uid == request.auth.uid)
+          ||
+          (exists(/databases/$(database)/documents/spaces/$(spaceId)/members/B)
+            && get(/databases/$(database)/documents/spaces/$(spaceId)/members/B).data.uid == request.auth.uid)
+        );
+    }
+
+    match /spaces/{spaceId} {
+      allow create: if signedIn()
+        && request.resource.data.createdBy == request.auth.uid;
+      allow get: if signedIn() && isMember(spaceId);
+      allow list, update, delete: if false;
+
+      match /members/{slot} {
+        allow get: if signedIn();
+        allow list, update, delete: if false;
+
+        allow create: if signedIn()
+          && (
+            (slot == "A"
+              && getAfter(/databases/$(database)/documents/spaces/$(spaceId)).data.createdBy == request.auth.uid
+              && !exists(/databases/$(database)/documents/spaces/$(spaceId)/members/A))
+            ||
+            (slot == "B"
+              && request.resource.data.uid == request.auth.uid
+              && request.resource.data.inviteKey is string
+              && exists(/databases/$(database)/documents/invites/$(request.resource.data.inviteKey))
+              && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteKey)).data.spaceId == spaceId
+              && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteKey)).data.createdBy
+                == get(/databases/$(database)/documents/spaces/$(spaceId)).data.createdBy
+              && exists(/databases/$(database)/documents/spaces/$(spaceId)/members/A)
+              && get(/databases/$(database)/documents/spaces/$(spaceId)/members/A).data.uid
+                == get(/databases/$(database)/documents/spaces/$(spaceId)).data.createdBy
+              && !exists(/databases/$(database)/documents/spaces/$(spaceId)/members/B))
+          );
+      }
+
+      match /data/{documentId} {
+        allow read, write: if documentId == "main" && isMember(spaceId);
+      }
+    }
+
+    match /invites/{inviteKey} {
+      allow get: if signedIn();
+      allow list, update, delete: if false;
+      allow create: if signedIn()
+        && request.resource.data.createdBy == request.auth.uid
+        && getAfter(/databases/$(database)/documents/spaces/$(request.resource.data.spaceId)).data.createdBy
+          == request.auth.uid;
+    }
+  }
+}
