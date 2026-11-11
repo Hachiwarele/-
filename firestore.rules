@@ -16,6 +16,17 @@ service cloud.firestore {
         );
     }
 
+    function isMemberAfter(spaceId) {
+      return signedIn()
+        && (
+          (existsAfter(/databases/$(database)/documents/spaces/$(spaceId)/members/A)
+            && getAfter(/databases/$(database)/documents/spaces/$(spaceId)/members/A).data.uid == request.auth.uid)
+          ||
+          (existsAfter(/databases/$(database)/documents/spaces/$(spaceId)/members/B)
+            && getAfter(/databases/$(database)/documents/spaces/$(spaceId)/members/B).data.uid == request.auth.uid)
+        );
+    }
+
     match /spaces/{spaceId} {
       allow create: if signedIn()
         && request.resource.data.createdBy == request.auth.uid;
@@ -47,7 +58,8 @@ service cloud.firestore {
       }
 
       match /data/{documentId} {
-        allow read, write: if documentId == "main" && isMember(spaceId);
+        allow read, update, delete: if documentId == "main" && isMember(spaceId);
+        allow create: if documentId == "main" && isMemberAfter(spaceId);
       }
     }
 
