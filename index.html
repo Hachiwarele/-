@@ -372,6 +372,13 @@ footer {
     <div class="history-meta" style="margin-top:12px">
       名前を変更しても、過去の取引データはそのまま残ります。
     </div>
+    <div style="border-top:1px solid var(--border);margin-top:18px;padding-top:16px">
+      <h3 style="font-size:14px;margin:0 0 8px">共有スペース</h3>
+      <p class="history-meta" style="line-height:1.7;margin:0 0 12px">
+        この端末を現在の部屋から退出させ、部屋の作成・招待キー入力画面に戻ります。部屋のクラウドデータや、もう1人の端末には影響しません。
+      </p>
+      <button class="secondary" id="leaveSpaceButton" style="width:100%">この端末で部屋を退出する</button>
+    </div>
   </section>
 
   <div class="sync-status" id="syncStatus">共有データに接続中…</div>
@@ -790,6 +797,28 @@ $("historyList").addEventListener("click", e => {
   data.transactions = data.transactions.filter(t => t.id !== btn.dataset.delete);
   save();
   render();
+});
+
+$("leaveSpaceButton").addEventListener("click", () => {
+  const ok = confirm(
+    "この端末を現在の共有スペースから退出させますか？\n\n部屋のクラウドデータと、もう1人の端末のデータは削除されません。\nこの端末では部屋の作成・招待キー入力画面に戻ります。"
+  );
+  if (!ok) return;
+
+  cloudReady = false;
+  if (unsubscribeCloud) {
+    unsubscribeCloud();
+    unsubscribeCloud = null;
+  }
+  cloudDataRef = null;
+  localStorage.removeItem(SPACE_KEY);
+  localStorage.removeItem(STORAGE_KEY);
+  data = structuredClone(initialData);
+  render();
+  $("inviteResult").classList.add("hidden");
+  $("inviteInput").value = "";
+  $("authMessage").classList.add("hidden");
+  showAuth();
 });
 
 $("saveSettings").addEventListener("click", () => {
